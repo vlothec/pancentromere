@@ -1,0 +1,15 @@
+## agp-version 2.1
+# AGP created by RagTag v2.0.1
+Chr4_RagTag_RagTag	1	1556447	1	W	Chr4_RagTag_RagTag.1	1	1556447	+
+Chr4_RagTag_RagTag	1556448	1556547	2	U	100	scaffold	yes	align_genus
+Chr4_RagTag_RagTag	1556548	2653219	3	W	Chr4_RagTag_RagTag.2	1	1096672	+
+Chr4_RagTag_RagTag	2653220	2653319	4	U	100	scaffold	yes	align_genus
+Chr4_RagTag_RagTag	2653320	3309119	5	W	Chr4_RagTag_RagTag.3	1	655800	+
+Chr4_RagTag_RagTag	3309120	3309219	6	U	100	scaffold	yes	align_genus
+Chr4_RagTag_RagTag	3309220	5155060	7	W	Chr4_RagTag_RagTag.5	1	1845841	-
+Chr4_RagTag_RagTag	5155061	5155160	8	U	100	scaffold	yes	align_genus
+Chr4_RagTag_RagTag	5155161	8297844	9	W	Chr4_RagTag_RagTag.4	1	3142684	-
+Chr4_RagTag_RagTag	8297845	8297944	10	U	100	scaffold	yes	align_genus
+Chr4_RagTag_RagTag	8297945	20379442	11	W	Chr4_RagTag_RagTag.6	1	12081498	+
+Chr4_RagTag_RagTag	20379443	20379542	12	U	100	scaffold	yes	align_genus
+Chr4_RagTag_RagTag	20379543	23300978	13	W	Chr4_RagTag_RagTag.7	1	2921436	+

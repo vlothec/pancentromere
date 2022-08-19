@@ -1,0 +1,92 @@
+---
+title: "plot_gene_trees"
+output: html_document
+date: '2022-05-05'
+---
+
+
+```{r}
+# Required packages
+library(phyloseq)
+library(ggtree)
+library(treeio)
+library(ggplot2)
+
+
+# Define working directory
+WORKDIR <- "<path_to_multiple_alignments>"
+
+# Import data frame with CEN clusters, and re-structure it
+genotypes <- read.table("66_genomes_summary.txt", sep = "\t", header = TRUE, stringsAsFactor=T)
+
+
+centromeres <- genotypes [ , which(colnames(genotypes) == "Accession" | colnames(genotypes) == "CEN1" | colnames(genotypes) == "CEN2" | colnames(genotypes) == "CEN3" | colnames(genotypes) == "CEN4" | colnames(genotypes) == "CEN5") ]
+head(centromeres)
+
+# Make heatmap
+heatmap <- centromeres[2:6]
+rownames(heatmap) <- centromeres[,1]
+
+# order levels for cen
+heatmap$CEN1 <- factor(heatmap$CEN1, levels = c("1", "2", "3","4","5","6","7","8","9","10","11","12","13","Orphan"))
+heatmap$CEN2 <- factor(heatmap$CEN2, levels = c("1", "2", "3","4","5","6","7","8","9","10","11","12","13","Orphan"))
+heatmap$CEN3 <- factor(heatmap$CEN3, levels = c("1", "2", "3","4","5","6","7","8","9","10","11","12","13","Orphan"))
+heatmap$CEN4 <- factor(heatmap$CEN4, levels = c("1", "2", "3","4","5","6","7","8","9","10","11","12","13","Orphan"))
+heatmap$CEN5 <- factor(heatmap$CEN5, levels = c("1", "2", "3","4","5","6","7","8","9","10","11","12","13","Orphan"))
+
+# Define colour palette (with factors!!!)
+colours14 <- c('#a6cee3', '#1f78b4', '#b2df8a', '#33a02c', '#fb9a99', '#e31a1c', '#fdbf6f', '#ff7f00', '#cab2d6', '#6a3d9a', '#ffff99', '#b15928', '#bababa', '#252525')
+names(colours14) <- as.factor(c("1", "2", "3","4","5","6","7","8","9","10","11","12","13","Orphan"))
+
+# Parse directory to define genes
+genes <- dir(WORKDIR, pattern = "AT")
+
+IDs <- unlist(lapply(strsplit(as.character(genes), "[_]"), "[", 1))
+
+# LOOP through all genes
+
+for( i in 1:length(genes)) {
+  # Read RAXML tree
+  tree <- read.newick(paste(WORKDIR, "/", genes[i], "/", IDs[i], ".66accs.nt.mafft.fa.raxml.supportFBP", sep = ""), node.label="support")
+  
+  # Extract some relevant metadata
+  x <- as_tibble(tree)
+
+  # DEPRECATED #
+  # Add Metadata to the tree
+  #y <- full_join(x, centromeres, by = 'label')
+  #y
+
+  #print phylogeny, simple way
+  plot(tree@phylo)
+
+  #Labels 
+  tree@phylo$tip.label
+
+  # First plot (basic tree)
+  p1 <- ggtree(tree) %<+% centromeres +
+    geom_tiplab(size=2.5, align=TRUE, linetype='dotted', linesize=.3)
+  p1
+
+  # gheatmap
+  p2 <- gheatmap(p1, heatmap, colnames_position = "top", offset = 0.002, width=.6, colnames_offset_y = 1, colnames_angle=0) + 
+    scale_fill_manual("Cluster", values = colours14) +
+    ggtitle(genes[i])
+
+  pdf(paste(WORKDIR, "/", genes[i], "/", IDs[i], ".66accs.nt.tree_with_heatmap.pdf", sep = ""), width = 9, height = 9)
+  print(p2)
+  dev.off()
+
+}
+
+
+```
+
+
+
+
+
+
+
+
+

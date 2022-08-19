@@ -1,0 +1,119 @@
+---
+title: "NucFreq.plots"
+output: html_document
+date: '2022-07-08'
+---
+
+
+```{r }
+library(ggplot2)
+
+WORKDIR <- "<path_to_working_directory>"
+
+acc_dirs <- list.dirs(path = WORKDIR, full.names = TRUE, recursive = FALSE)
+acc_names <- sapply(strsplit(acc_dirs, "/"), "[", 8)
+
+chromosomes <- data.frame(chr=c("Chr1", "Chr2", "Chr3", "Chr4", "Chr5"))
+
+# Loop for all accessions
+for(i in 1:length(acc_names)){
+  
+  # Read BED file
+  tmp_bed <-  read.table(paste(acc_dirs[i], "/", acc_names[i], ".CCS.Chr.F2308.bed", sep=""), header=FALSE)
+  # Re-arrange for ggplot2
+  tmp_bed2 <- data.frame(tmp_bed$V1, tmp_bed$V2, tmp_bed$V4)
+  colnames(tmp_bed2) <- c("Chromosome", "Position", "Coverage")
+  tmp_bed2$Allele <- "Primary"
+  tmp_bed3 <- data.frame(tmp_bed$V1, tmp_bed$V2, tmp_bed$V5)
+  colnames(tmp_bed3) <- c("Chromosome", "Position", "Coverage")
+  tmp_bed3$Allele <- "Secondary"
+
+  tmp_bed <- rbind(tmp_bed2, tmp_bed3)
+  #tmp_bed
+
+  # Obtain Coverage from SDA file
+  tmp_cov <-  read.table(paste(acc_dirs[i], "/SDA/sda_out/coverage/sda.coverage.stats", sep=""), header=TRUE)
+  mean_cov <- tmp_cov[1,1]
+  
+  # Estimate median coverage to determine plot height
+  if(mean_cov*2.5 < 120){
+    mean_cov <- 50
+  }else if(mean_cov*2.5 > 450){
+    mean_cov <- 150
+  }
+  
+  # Read CEN coordinates
+  tmp_CEN <- read.table(paste(acc_dirs[i], "/", acc_names[i], ".Table_S3.bed", sep=""), header=FALSE)
+  tmp_CEN <- tmp_CEN[,-4]
+  colnames(tmp_CEN) <- c("Chromosome", "Start", "End")
+  tmp_CEN$Annotation <- "Centromere"
+  
+  # Read GAP positions
+  tmp_N <-  tryCatch(read.table(paste(acc_dirs[i], "/../../1_annotation_repeats/", acc_names[i], "/", acc_names[i],".N.txt", sep=""), header=FALSE), error=function(e) NULL)
+  if(is.null(tmp_N)){
+    #tmp_N <- tmp_N
+    tmp_N <- data.frame(Chromosome="Chr1", Start=0, End=1, Annotation="Assembly gap")
+  }else{  
+    colnames(tmp_N) <- c("Chromosome", "Start", "End", "Length")
+    tmp_N <- tmp_N[,-4]
+    tmp_N$Annotation <- "Assembly gap"
+  # Artificially increase the gap size for the purpose of plotting.
+    tmp_N$Start <- tmp_N$Start - 25000
+    tmp_N$End <- tmp_N$End + 25000
+  }
+  
+  # Read organellar insertions and rDNA coordinates
+  tmp_gff <-  tryCatch(read.table(paste(acc_dirs[i], "/../../1_annotation_repeats/", acc_names[i], "/", acc_names[i],".Repeats_merged.gff", sep=""), header=FALSE), error=function(e) NULL)
+  tmp_gff$V6 <- tmp_gff$V3
+  tmp_gff <- tmp_gff[,-c(2,3,7:9)]
+  colnames(tmp_gff) <- c("Chromosome", "Start", "End", "Annotation")
+  
+  # 45S rDNA
+  tmp_45S <- subset(tmp_gff, Annotation == "45S_rDNA")
+  tmp_45S$Annotation <- "45S rDNA"
+  
+  # 5S rDNA
+  tmp_5S <- subset(tmp_gff, Annotation == "5S_rDNA")
+  tmp_5S$Annotation <- "5S rDNA"
+  
+  # 45S rDNA
+  tmp_organelle <- subset(tmp_gff, Annotation == "chloroplast" | Annotation == "mitochondria")
+  tmp_organelle$Annotation <- "Organellar insertion"
+
+  # Combine CEN, GAP, rDNA, organelles
+  tmp_ALL <- rbind(tmp_CEN, tmp_N, tmp_45S, tmp_5S, tmp_organelle)
+  #tmp_ALL
+  
+  # Keep only chromosomes
+  tmp_ALL <- tmp_ALL[ grep("^Chr", tmp_ALL$Chromosome), ]
+  
+  # Order Annotations
+  tmp_ALL$Annotation <- factor(tmp_ALL$Annotation, levels=c("Assembly gap", "Centromere", "45S rDNA", "5S rDNA", "Organellar insertion"))
+  
+  # Make plots
+  p1_simple <- ggplot(data = tmp_bed) + geom_point(aes(x=Position, y=Coverage, color=Allele), size=0.4) + 
+    facet_grid(Chromosome ~ .) +
+    ggtitle(paste(acc_names[i], sep="")) +
+    scale_color_manual(values = c( "#08306b", "#6baed6") ) +
+    xlab("Chromosome coordinate (bp)") + 
+    ylim(0,mean_cov*2.5) +
+    theme_light()
+  #p1_simple
+
+  p2_CEN_N <- p1_simple + geom_rect(data = tmp_ALL,
+            aes(xmin = Start, xmax = End,
+                ymin =  -Inf, ymax = Inf, fill = Annotation) ) +
+          scale_fill_manual(values = c( "#a63603", "#73737350", "#2d004b50", "#fdae6160", "#4d922150") ) +
+    guides(color = guide_legend(override.aes = list(size = 2)))
+  p2_CEN_N
+  
+  png(paste(acc_dirs[i], "/", acc_names[i], ".CCS.Chr.F2308.alleles_REPEATS_N.png", sep=""), res = 500, width = 4000, height =3000)
+  print(p2_CEN_N)
+  dev.off()
+
+}
+
+
+
+```
+

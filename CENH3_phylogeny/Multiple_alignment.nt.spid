@@ -1,0 +1,17 @@
+# spid-file generated: Tue Oct 13 10:38:15 MEST 2020
+
+# FASTA Parser questions
+PARSER_FORMAT=FASTA
+
+# Select the type of the data:
+FASTA_PARSER_DATA_TYPE_QUESTION=DNA
+
+# NEXUS Writer questions
+WRITER_FORMAT=NEXUS
+
+# Do you want to convert SNPs into binary format?
+NEXUS_WRITER_BINARY_QUESTION=FALSE
+# Specify which data type should be included in the NEXUS file  (NEXUS can only analyze one data type per file):
+NEXUS_WRITER_DATA_TYPE_QUESTION=DNA
+# Specify the locus/locus combination you want to write to the NEXUS file:
+NEXUS_WRITER_LOCUS_COMBINATION_QUESTION=STRING
