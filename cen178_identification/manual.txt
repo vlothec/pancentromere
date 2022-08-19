@@ -1,0 +1,44 @@
+#TRASH: Tandem Repeat Annotation and Structural Hierarchy
+Identify and extract tandem repeats and investigate their higher order structure
+Local kmer counting finds regions that are repetitive. Windows (1kb by default) are scored based on proportion of repeated kmers to their size. Threshold is a score above which windows are considered to contain repeats. Periodicity of repeats is established and MAFFT is used to iterate over candidate representative sequences to find a consensus.
+
+##Requirements:
+Linux OS
+R installed (https://cran.r-project.org/), TRASH is developed and tested with R/4.0.3
+
+##Installation:
+Unpack TRASH_v1.0.tgz with 
+tar xfvz TRASH_v1.0.tgz
+Install required R packages with
+sh TRASH_install.sh
+Note: If you are an R user and you want to use your default library path to be used for packages installations (and to use the ones you have installed), install with:
+sh TRASH_install.sh --def
+
+##Run:
+sh TRASH_run.sh -o <output_directory> /home/usr/assembly.fasta
+Will run TRASH on the assembly.fasta file and direct the output into the output_directory specified. 
+Command line arguments:
+Note: “-” flags require additional input after the flag
+"--def" 	use when installed TRASH with “--def” flag 
+"-w"		change word size used while looking for repetitive regions
+"-win"		size of a sliding window
+"-t"		set threshold of a window score to be repetitive
+"-m" 		set max repeat size
+"-freg" 	set the minimum size of regions
+"-frep" 	set the minimum size of repeats
+"-o" 		output path
+"-seqt"		file with sequence templates
+"-par" 		sets the number of cores to use working in parallel
+
+##Sequence templates:
+A .csv file can be supplied to inform on previously existing repeats. The script will compare the ones identified to the templates provided and try to categorise them (“class” column in output files). It will also ensure that the repeats that belong to that family are being mapped in the same frame as the template one. 
+This is not required for TRASH to work.
+
+##Output:
+Running an assembly.fasta will produce in the output directory:
+./Summary.of.repetitive.regions.assembly.fasta
+File containing information about repetitive regions
+./all.repeats.from.assembly.fasta.csv
+File containing all repeats identified
+./assembly.fasta_out directory
+Directory with folders containing temporary files from the run (can be removed if not needed), “plots” folder containing simple visualisation of the identified repeats and region files from each separate sequence within the fasta file.
