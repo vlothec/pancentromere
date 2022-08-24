@@ -1,0 +1,116 @@
+# Snakemake workflow for creating a matrix of windowed
+# coverage values for genomic features and flanking regions 
+
+# Usage ("--cores" should match the "THREADS" parameter in config.yaml, and reflect available threads):
+# conda activate ChIPseq_mapping
+# snakemake -p --cores 48
+# conda deactivate
+
+import os
+
+# Specify config file parameters
+configfile: "config.yaml"
+sample    = config["SAMPLE"]
+chrName   = config["FEATURES"]["chrName"]
+reference = config["MAPPING"]["reference"]
+refbase   = os.path.basename(reference)
+mode      = config["MAPPING"]["mode"]
+flankName = config["COVERAGE"]["flankName"]
+binName   = config["COVERAGE"]["binName"]
+
+# Specify the desired end target file(s)
+rule all:
+    input:
+        expand("matrices/{sample}_MappedOn_{refbase}_lowXM_{mode}_sort_norm_CEN180_in_{chrName}_matrix_bin{binName}_flank{flankName}.tab",
+               sample = sample,
+               refbase = refbase,
+               mode = mode,
+               chrName = chrName,
+               binName = binName,
+               flankName = flankName),
+        expand("matrices/{sample}_MappedOn_{refbase}_lowXM_{mode}_sort_norm_CEN180_in_{chrName}_ranLoc_matrix_bin{binName}_flank{flankName}.tab",
+               sample = sample,
+               refbase = refbase,
+               mode = mode,
+               chrName = chrName,
+               binName = binName,
+               flankName = flankName),
+        expand("matrices/{sample}_MappedOn_{refbase}_lowXM_{mode}_sort_norm_CEN180_in_{chrName}_CENranLoc_matrix_bin{binName}_flank{flankName}.tab",
+               sample = sample,
+               refbase = refbase,
+               mode = mode,
+               chrName = chrName,
+               binName = binName,
+               flankName = flankName),
+
+# Use computeMatrix function from deepTools to create a matrix of
+# coverage values for genomic features and flanking regions, and
+# for equivalent random loci and flanking regions
+rule compute_matrix_genomeRegionFeatures:
+    """Create matrices of coverage values for genomic features and random loci"""
+    input:
+        featuresFile     = "/home/ajt200/analysis/pancentromere/annotation/CEN180/{refbase}/CEN180_in_{refbase}_{chrName}.bed",
+        ranLocFile       = "/home/ajt200/analysis/pancentromere/annotation/CEN180/{refbase}/CEN180_in_{refbase}_{chrName}_randomLoci.bed",
+        CENranLocFile    = "/home/ajt200/analysis/pancentromere/annotation/CEN180/{refbase}/CEN180_in_{refbase}_{chrName}_CENrandomLoci.bed",
+        BW               = "../{mode}/bw/{sample}_MappedOn_{refbase}_lowXM_{mode}_sort_norm.bw"
+    output:
+        featuresGZ   = temp("matrices/{sample}_MappedOn_{refbase}_lowXM_{mode}_sort_norm_CEN180_in_{chrName}_matrix_bin{binName}_flank{flankName}.gz"),
+        featuresTAB  = "matrices/{sample}_MappedOn_{refbase}_lowXM_{mode}_sort_norm_CEN180_in_{chrName}_matrix_bin{binName}_flank{flankName}.tab",
+        ranLocGZ     = temp("matrices/{sample}_MappedOn_{refbase}_lowXM_{mode}_sort_norm_CEN180_in_{chrName}_ranLoc_matrix_bin{binName}_flank{flankName}.gz"),
+        ranLocTAB    = "matrices/{sample}_MappedOn_{refbase}_lowXM_{mode}_sort_norm_CEN180_in_{chrName}_ranLoc_matrix_bin{binName}_flank{flankName}.tab",
+        CENranLocGZ  = temp("matrices/{sample}_MappedOn_{refbase}_lowXM_{mode}_sort_norm_CEN180_in_{chrName}_CENranLoc_matrix_bin{binName}_flank{flankName}.gz"),
+        CENranLocTAB = "matrices/{sample}_MappedOn_{refbase}_lowXM_{mode}_sort_norm_CEN180_in_{chrName}_CENranLoc_matrix_bin{binName}_flank{flankName}.tab"
+    params:
+        regionBodyLength        = config["COVERAGE"]["regionBodyLength"],
+        startLabel              = config["COVERAGE"]["startLabel"],
+        endLabel                = config["COVERAGE"]["endLabel"],
+        upstream                = config["COVERAGE"]["upstream"],
+        downstream              = config["COVERAGE"]["downstream"],
+        binSize                 = config["COVERAGE"]["binSize"],
+        sortRegions             = config["COVERAGE"]["sortRegions"]
+    log:
+        features  = "logs/computeMatrix/{sample}_MappedOn_{refbase}_lowXM_{mode}_sort_norm_CEN180_in_{chrName}_matrix_bin{binName}_flank{flankName}.log",
+        ranLoc    = "logs/computeMatrix/{sample}_MappedOn_{refbase}_lowXM_{mode}_sort_norm_CEN180_in_{chrName}_ranLoc_matrix_bin{binName}_flank{flankName}.log",
+        CENranLoc = "logs/computeMatrix/{sample}_MappedOn_{refbase}_lowXM_{mode}_sort_norm_CEN180_in_{chrName}_CENranLoc_matrix_bin{binName}_flank{flankName}.log"
+    threads:
+        config["THREADS"]  
+    shell:
+        "(computeMatrix scale-regions"
+        " --regionsFileName {input.featuresFile}"
+        " --scoreFileName {input.BW}"
+        " --outFileName {output.featuresGZ}"
+        " --outFileNameMatrix {output.featuresTAB}"
+        " --regionBodyLength {params.regionBodyLength}"
+        " --startLabel {params.startLabel}"
+        " --endLabel {params.endLabel}"
+        " --upstream {params.upstream}"
+        " --downstream {params.downstream}"
+        " --binSize {params.binSize}"
+        " --sortRegions {params.sortRegions}"
+        " --numberOfProcessors {threads}) 2> {log.features}; "
+        "(computeMatrix scale-regions"
+        " --regionsFileName {input.ranLocFile}"
+        " --scoreFileName {input.BW}"
+        " --outFileName {output.ranLocGZ}"
+        " --outFileNameMatrix {output.ranLocTAB}"
+        " --regionBodyLength {params.regionBodyLength}"
+        " --startLabel {params.startLabel}"
+        " --endLabel {params.endLabel}"
+        " --upstream {params.upstream}"
+        " --downstream {params.downstream}"
+        " --binSize {params.binSize}"
+        " --sortRegions {params.sortRegions}"
+        " --numberOfProcessors {threads}) 2> {log.ranLoc}; "
+        "(computeMatrix scale-regions"
+        " --regionsFileName {input.CENranLocFile}"
+        " --scoreFileName {input.BW}"
+        " --outFileName {output.CENranLocGZ}"
+        " --outFileNameMatrix {output.CENranLocTAB}"
+        " --regionBodyLength {params.regionBodyLength}"
+        " --startLabel {params.startLabel}"
+        " --endLabel {params.endLabel}"
+        " --upstream {params.upstream}"
+        " --downstream {params.downstream}"
+        " --binSize {params.binSize}"
+        " --sortRegions {params.sortRegions}"
+        " --numberOfProcessors {threads}) 2> {log.CENranLoc}"

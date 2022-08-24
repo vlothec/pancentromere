@@ -1,0 +1,140 @@
+# Snakemake workflow for creating a matrix of windowed
+# coverage values for genomic features and flanking regions 
+
+# Usage ("--cores" should match the "THREADS" parameter in config.yaml, and reflect available threads):
+# conda activate sRNAseq_mapping
+# snakemake -p --profile profile/
+# conda deactivate
+
+import os
+
+# Specify config file parameters
+configfile: "config.yaml"
+sample    = config["SAMPLE"]
+chrName   = config["FEATURES"]["chrName"]
+reference = config["MAPPING"]["reference"]
+refbase   = os.path.basename(reference)
+mode      = config["MAPPING"]["mode"]
+flankName = config["COVERAGE"]["flankName"]
+binName   = config["COVERAGE"]["binName"]
+
+# Specify the desired end target file(s)
+rule all:
+    input:
+        expand("matrices/{sample}_MappedOn_{refbase}_lowXM_{mode}_sort_norm_CENATHILA_in_{chrName}_matrix_bin{binName}_flank{flankName}.tab",
+               sample = sample,
+               refbase = refbase,
+               mode = mode,
+               chrName = chrName,
+               binName = binName,
+               flankName = flankName),
+        expand("matrices/{sample}_MappedOn_{refbase}_lowXM_{mode}_sort_norm_nonCENATHILA_in_{chrName}_matrix_bin{binName}_flank{flankName}.tab",
+               sample = sample,
+               refbase = refbase,
+               mode = mode,
+               chrName = chrName,
+               binName = binName,
+               flankName = flankName),
+        expand("matrices/{sample}_MappedOn_{refbase}_lowXM_{mode}_sort_norm_CENATHILA_in_{chrName}_CENranLoc_matrix_bin{binName}_flank{flankName}.tab",
+               sample = sample,
+               refbase = refbase,
+               mode = mode,
+               chrName = chrName,
+               binName = binName,
+               flankName = flankName),
+        expand("matrices/{sample}_MappedOn_{refbase}_lowXM_{mode}_sort_norm_nonCENATHILA_in_{chrName}_nonCENranLoc_matrix_bin{binName}_flank{flankName}.tab",
+               sample = sample,
+               refbase = refbase,
+               mode = mode,
+               chrName = chrName,
+               binName = binName,
+               flankName = flankName),
+
+# Use computeMatrix function from deepTools to create a matrix of
+# coverage values for genomic features and flanking regions, and
+# for equivalent random loci and flanking regions
+rule computeMatrix:
+    """Create matrices of coverage values for genomic features and random loci"""
+    input:
+        CENATHILAFile                 = "/home/ajt200/analysis/pancentromere/annotation/ATHILA/ATHILA/{refbase}/CENATHILA_in_{refbase}_{chrName}.bed",
+        nonCENATHILAFile              = "/home/ajt200/analysis/pancentromere/annotation/ATHILA/ATHILA/{refbase}/nonCENATHILA_in_{refbase}_{chrName}.bed",
+        CENATHILA_CENranLocFile       = "/home/ajt200/analysis/pancentromere/annotation/ATHILA/ATHILA/{refbase}/CENATHILA_in_{refbase}_{chrName}_CENrandomLoci.bed",
+        nonCENATHILA_nonCENranLocFile = "/home/ajt200/analysis/pancentromere/annotation/ATHILA/ATHILA/{refbase}/nonCENATHILA_in_{refbase}_{chrName}_nonCENrandomLoci.bed",
+        BW                            = "../{mode}/bw/{sample}_MappedOn_{refbase}_lowXM_{mode}_sort_norm.bw"
+    output:
+        CENATHILAGZ                   = temp("matrices/{sample}_MappedOn_{refbase}_lowXM_{mode}_sort_norm_CENATHILA_in_{chrName}_matrix_bin{binName}_flank{flankName}.gz"),
+        CENATHILATAB                  = "matrices/{sample}_MappedOn_{refbase}_lowXM_{mode}_sort_norm_CENATHILA_in_{chrName}_matrix_bin{binName}_flank{flankName}.tab",
+        nonCENATHILAGZ                = temp("matrices/{sample}_MappedOn_{refbase}_lowXM_{mode}_sort_norm_nonCENATHILA_in_{chrName}_matrix_bin{binName}_flank{flankName}.gz"),
+        nonCENATHILATAB               = "matrices/{sample}_MappedOn_{refbase}_lowXM_{mode}_sort_norm_nonCENATHILA_in_{chrName}_matrix_bin{binName}_flank{flankName}.tab",
+        CENATHILA_CENranLocGZ         = temp("matrices/{sample}_MappedOn_{refbase}_lowXM_{mode}_sort_norm_CENATHILA_in_{chrName}_CENranLoc_matrix_bin{binName}_flank{flankName}.gz"),
+        CENATHILA_CENranLocTAB        = "matrices/{sample}_MappedOn_{refbase}_lowXM_{mode}_sort_norm_CENATHILA_in_{chrName}_CENranLoc_matrix_bin{binName}_flank{flankName}.tab",
+        nonCENATHILA_nonCENranLocGZ   = temp("matrices/{sample}_MappedOn_{refbase}_lowXM_{mode}_sort_norm_nonCENATHILA_in_{chrName}_nonCENranLoc_matrix_bin{binName}_flank{flankName}.gz"),
+        nonCENATHILA_nonCENranLocTAB  = "matrices/{sample}_MappedOn_{refbase}_lowXM_{mode}_sort_norm_nonCENATHILA_in_{chrName}_nonCENranLoc_matrix_bin{binName}_flank{flankName}.tab"
+    params:
+        regionBodyLength        = config["COVERAGE"]["regionBodyLength"],
+        startLabel              = config["COVERAGE"]["startLabel"],
+        endLabel                = config["COVERAGE"]["endLabel"],
+        upstream                = config["COVERAGE"]["upstream"],
+        downstream              = config["COVERAGE"]["downstream"],
+        binSize                 = config["COVERAGE"]["binSize"],
+        sortRegions             = config["COVERAGE"]["sortRegions"]
+    log:
+        CENATHILA                 = "logs/computeMatrix/{sample}_MappedOn_{refbase}_lowXM_{mode}_sort_norm_CENATHILA_in_{chrName}_matrix_bin{binName}_flank{flankName}.log",
+        nonCENATHILA              = "logs/computeMatrix/{sample}_MappedOn_{refbase}_lowXM_{mode}_sort_norm_nonCENATHILA_in_{chrName}_matrix_bin{binName}_flank{flankName}.log",
+        CENATHILA_CENranLoc       = "logs/computeMatrix/{sample}_MappedOn_{refbase}_lowXM_{mode}_sort_norm_CENATHILA_in_{chrName}_CENranLoc_matrix_bin{binName}_flank{flankName}.log",
+        nonCENATHILA_nonCENranLoc = "logs/computeMatrix/{sample}_MappedOn_{refbase}_lowXM_{mode}_sort_norm_nonCENATHILA_in_{chrName}_nonCENranLoc_matrix_bin{binName}_flank{flankName}.log"
+    threads:
+        config["THREADS"]  
+    shell:
+        "(computeMatrix scale-regions"
+        " --regionsFileName {input.CENATHILAFile}"
+        " --scoreFileName {input.BW}"
+        " --outFileName {output.CENATHILAGZ}"
+        " --outFileNameMatrix {output.CENATHILATAB}"
+        " --regionBodyLength {params.regionBodyLength}"
+        " --startLabel {params.startLabel}"
+        " --endLabel {params.endLabel}"
+        " --upstream {params.upstream}"
+        " --downstream {params.downstream}"
+        " --binSize {params.binSize}"
+        " --sortRegions {params.sortRegions}"
+        " --numberOfProcessors {threads}) 2> {log.CENATHILA}; "
+        "(computeMatrix scale-regions"
+        " --regionsFileName {input.nonCENATHILAFile}"
+        " --scoreFileName {input.BW}"
+        " --outFileName {output.nonCENATHILAGZ}"
+        " --outFileNameMatrix {output.nonCENATHILATAB}"
+        " --regionBodyLength {params.regionBodyLength}"
+        " --startLabel {params.startLabel}"
+        " --endLabel {params.endLabel}"
+        " --upstream {params.upstream}"
+        " --downstream {params.downstream}"
+        " --binSize {params.binSize}"
+        " --sortRegions {params.sortRegions}"
+        " --numberOfProcessors {threads}) 2> {log.nonCENATHILA}; "
+        "(computeMatrix scale-regions"
+        " --regionsFileName {input.CENATHILA_CENranLocFile}"
+        " --scoreFileName {input.BW}"
+        " --outFileName {output.CENATHILA_CENranLocGZ}"
+        " --outFileNameMatrix {output.CENATHILA_CENranLocTAB}"
+        " --regionBodyLength {params.regionBodyLength}"
+        " --startLabel {params.startLabel}"
+        " --endLabel {params.endLabel}"
+        " --upstream {params.upstream}"
+        " --downstream {params.downstream}"
+        " --binSize {params.binSize}"
+        " --sortRegions {params.sortRegions}"
+        " --numberOfProcessors {threads}) 2> {log.CENATHILA_CENranLoc}; "
+        "(computeMatrix scale-regions"
+        " --regionsFileName {input.nonCENATHILA_nonCENranLocFile}"
+        " --scoreFileName {input.BW}"
+        " --outFileName {output.nonCENATHILA_nonCENranLocGZ}"
+        " --outFileNameMatrix {output.nonCENATHILA_nonCENranLocTAB}"
+        " --regionBodyLength {params.regionBodyLength}"
+        " --startLabel {params.startLabel}"
+        " --endLabel {params.endLabel}"
+        " --upstream {params.upstream}"
+        " --downstream {params.downstream}"
+        " --binSize {params.binSize}"
+        " --sortRegions {params.sortRegions}"
+        " --numberOfProcessors {threads}) 2> {log.nonCENATHILA_nonCENranLoc}"

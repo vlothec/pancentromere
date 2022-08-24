@@ -1,0 +1,44 @@
+SAMPLES: [
+          "AGO5_D7_sRNA_Rep1",
+          "AGO5_D7_sRNA_Rep2",
+          "Input_D7_sRNA_Rep1",
+          "Input_D7_sRNA_Rep2",
+          "AGO5_D35_sRNA_Rep1",
+          "AGO5_D35_sRNA_Rep2",
+          "Input_D35_sRNA_Rep1",
+          "Input_D35_sRNA_Rep2",
+          "AGO9_D7_sRNA_Rep1",
+          "AGO9_D7_sRNA_Rep2",
+          "AGO9_D35_sRNA_Rep1",
+          "AGO9_D35_sRNA_Rep2"
+         ]
+THREADS: 76
+MEMORY: "256g"
+FILTER:
+  bbduk:
+      kmerSize: 18
+      rRNAfasta: "contaminants/ribokmers.fa.gz"
+  cutadapt:
+      3adapter: AACTGTAGGCACCATCAAT # -a (Qiagen miRNA library Kit 3' adapter (Cat. No. 331502))
+      5adapter: GTTCAGAGTTCTACAGTCCGACGATC # -g (Qiagen miRNA library Kit 5' adapter (Cat. No. 331502))
+      quality-filter: 20 # -q
+      minimum-overlap: 3 # -O (default: 3)
+      minimum-length: 18 # -m
+      maximum-length: 26 # -M
+      extra-params:
+# NOTE: reference genome-specific mapping parameters
+MAPPING:
+      # -k 1 (default): Report up to <int> valid alignments per read
+      mode: "both" # (both unique and multiple alignments: --best) (unique: -m 1)
+      mismatches: 0 # -v <int>
+      reference: "data/index/t2t-col.20210610"
+      sortMemory: "3G"
+# Specify small RNA sizes based on trimmed FastQC "Sequence Length Distribution"
+sRNA_SIZE: 18 # [18, 19, 20, 21, 22, 23, 24, 25, 26]
+sRNA_SIZES: [18, 19, 20, 21, 22, 23, 24, 25, 26]
+COVERAGE:
+      normalizeUsing: "BPM"
+      ignoreForNormalization: "ChrM ChrC" # Reference genome-specific parameter
+      binSize: 1
+      genomeBinSize: 10000
+      genomeBinName: "10kb"

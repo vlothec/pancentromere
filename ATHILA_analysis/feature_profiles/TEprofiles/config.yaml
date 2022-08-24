@@ -1,0 +1,43 @@
+THREADS: 32
+SAMPLE: [
+         "Col-0_CENH3_PE150_Rep1_ChIP",
+         "Col-0_CENH3_PE150_Rep1_input"
+        ]
+FEATURES:
+      chrName: [
+                "Chr1",
+                "Chr2",
+                "Chr3",
+                "Chr4",
+                "Chr5"
+               ]
+      superfamName: [
+#                     "All",
+#                     "Copia_LTR",
+#                     "EnSpm",
+                     "Gypsy_LTR"
+#                     "Harbinger",
+#                     "hAT",
+#                     "Helitron",
+#                     "LINE1",
+#                     "MuDR",
+#                     "Pogo_Tc1_Mariner",
+#                     "SINE",
+#                     "Unclassified",
+#                     "Unclassified_DNA",
+#                     "Unclassified_LINE",
+#                     "Unclassified_LTR"
+                    ]
+MAPPING:
+      mode: "both"
+      reference: "data/index/Col-0.ragtag_scaffolds"
+COVERAGE:
+      regionBodyLength: 2000
+      startLabel: "Start"
+      endLabel: "End"
+      upstream: 2000
+      downstream: 2000
+      flankName: "2kb"
+      binSize: 10
+      binName: "10bp"
+      sortRegions: "keep"

@@ -1,0 +1,31 @@
+#  mamba env create --name sRNAseq_mapping --file sRNAseq_mapping_environment.yaml 
+channels:
+  - conda-forge
+  - bioconda
+  - r
+  - defaults
+dependencies:
+  - snakemake=6.0.3
+  - pandas=0.24.2
+  - bbmap=38.22
+  - cutadapt=1.18
+  - fastqc=0.11.8
+  - multiqc=1.6
+  - bowtie=1.2.2
+  - samtools=1.9
+  - deeptools=3.1.3
+  - ucsc-bedgraphtobigwig=377
+  - r-base=4.0.0
+  - r-essentials
+  - r-yaml
+  - r-ggplot2
+  - r-doparallel
+  - r-argparse
+  - r-dplyr
+  - r-seqinr
+  - r-stringr
+  - bioconductor-rsamtools
+  - bioconductor-genomicalignments
+  - bioconductor-biostrings
+  - bioconductor-dmrcaller
+  - bioconductor-rtracklayer

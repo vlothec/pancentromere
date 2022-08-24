@@ -1,0 +1,40 @@
+SAMPLES: [
+          "Col-0_CENH3_PE150_Rep1_ChIP",
+          "Col-0_CENH3_PE150_Rep1_input"
+         ]
+THREADS: 48
+MEMORY: "250g"
+FILTER:
+  cutadapt:
+      R1_5prime_cut: 0 # -u
+      R1_3prime_cut: -0 # -u
+      R2_5prime_cut: 0 # -U
+      R2_3prime_cut: -0 # -U
+      adapter_R1: AGATCGGAAGAGCACACGTCTGAACTCCAGTCAC # -a
+      adapter_R2: AGATCGGAAGAGCGTCGTGTAGGGAAAGAGTGTAGATCTCGGTGGTCGCCGTATCATT # -A
+      quality-filter: 20 # -q
+      minimum-overlap: 3 # -O (default: 3)
+      minimum-length: 20 # -m
+      maximum-length: 1000 # -M
+      extra-params:
+# NOTE: reference genome-specific mapping parameters
+MAPPING:
+      alignments: 10 # "In -k <N> mode, Bowtie 2 searches for up to N distinct, valid alignments for each read"
+      reference: "data/index/Col-0.ragtag_scaffolds"
+      MAPQunique: 42 # -q
+      MAPQmaxi: 10 # -q
+      sortMemory: "4G"
+COVERAGE:
+      normalizeUsing: "BPM"
+      ignoreForNormalization: ""
+      binSize: 1
+      genomeBinSize: 10000
+      genomeBinName: "10kb"
+
+# NEBNext adapter and universal primer for Illumina:
+# https://international.neb.com/-/media/catalog/datacards-or-manuals/manuale7335.pdf
+# https://www.biostars.org/p/149301/
+# https://cutadapt.readthedocs.io/en/stable/guide.html#illumina-truseq
+# http://bioinformatics.cvr.ac.uk/blog/illumina-adapter-and-primer-sequences/
+# TruSeq adapters:
+# http://emea.support.illumina.com/bulletins/2016/12/what-sequences-do-i-use-for-adapter-trimming.html

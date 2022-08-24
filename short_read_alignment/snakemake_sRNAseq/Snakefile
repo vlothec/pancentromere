@@ -1,0 +1,641 @@
+# Snakemake workflow for aligning small RNA-seq reads to a reference genome
+# and calculating TPM-normalized coverage for different sRNA size classes
+# Adapted from Sebastian Mueller's Snakemake workflow:
+# https://github.com/seb-mueller/snakemake_sRNAseq
+
+# Chromosome sizes file below ("data/index/genome.fa.sizes") must exist
+# before running Snakefile
+# e.g., in "data/index/" run:
+# samtools faidx genome.fa; cut -f1,2 genome.fa.fai > genome.fa.sizes
+
+# Usage (snakemake --cores should reflect available cores):
+# conda env create --file environment.yaml --name sRNAseq_mapping
+# conda activate sRNAseq_mapping
+# snakemake -p --cores 48
+# conda deactivate
+
+import pandas as pd
+import os
+
+# For rules that invoke scripts using the "shell" directive,
+# we need to determine the base path of Snakefile since we
+# expect the "scripts/" subdirectory to be located here
+SRCDIR = srcdir("")
+
+# Specify config file parameters
+configfile: "config.yaml"
+samples       = config["SAMPLES"]
+mismatches    = config["MAPPING"]["mismatches"]
+reference     = config["MAPPING"]["reference"]
+refbase       = os.path.basename(reference)
+mode          = config["MAPPING"]["mode"]
+sRNAsize      = config["sRNA_SIZE"]
+sRNAsizes     = config["sRNA_SIZES"]
+genomeBinName = config["COVERAGE"]["genomeBinName"]
+
+# Determine bam index format (bai or csi) based on chromosome sizes
+# Genomes with chromosomes longer than ~500 Mb (e.g., in wheat) require a csi index
+# E.g., in axolotl: https://sourceforge.net/p/samtools/mailman/message/36249039/
+chrSizes = pd.read_csv("data/index/" + refbase + ".fa.sizes",
+                       header = None, sep = "\t")
+smallChrs = 0
+for x in chrSizes[1]:
+    if x < 5e+08:
+        smallChrs = smallChrs + 1
+
+if smallChrs < len(chrSizes[1]):
+    bamidx = "csi"
+else:
+    bamidx = "bai"
+
+# Set bowtie mapping parameters based on "mode" specified in config.yaml
+# (report uniquely aligned reads or both uniquely and multiply aligned reads)
+if mode == "unique":
+    bowtie_params = "-m 1"
+elif mode == "both":
+    bowtie_params = "--best"
+else:
+    bowtie_params = ""
+
+#ruleorder: fastqc_R1_raw > bbduk > cutadapt > fastqc_R1_trimmed > bowtie > sRNAsize_extract > postmapping > calc_coverage > calc_coverage_genome > postmapping_sRNAsize > calc_coverage_sRNAsize > calc_coverage_genome_sRNAsize > bin_bedgraphTPM > bedGraphToBigWig > genomeBin_bedgraphTPM
+
+# Specify the desired end target file(s)
+rule all:
+    input:
+        expand("logs/fastqc/raw/{sample}_R1_fastqc.html",
+               sample = samples),
+        expand("data/{sample}_R1_rRNAremoved.fastq.gz",
+               sample = samples),
+        expand("data/trimmed/{sample}_R1_rRNAremoved_trimmed.fastq.gz",
+               sample = samples),
+        expand("logs/fastqc/trimmed/{sample}_R1_rRNAremoved_trimmed_fastqc.html",
+               sample = samples),
+        expand("mapped/{mode}/{sample}_MappedOn_{refbase}_{mode}_sort.bam",
+               mode = mode,
+               sample = samples,
+               refbase = refbase),
+        expand("mapped/{mode}/{sample}_MappedOn_{refbase}_{mode}_{sRNAsize}nt_sort.bam",
+               mode = mode,
+               sample = samples,
+               refbase = refbase,
+               sRNAsize = sRNAsize),
+        expand("mapped/{mode}/{sample}_MappedOn_{refbase}_{mode}_sort.bam.{bamidx}",
+               mode = mode,
+               sample = samples,
+               refbase = refbase,
+               bamidx = bamidx),
+        expand("mapped/{mode}/{sample}_MappedOn_{refbase}_{mode}_{sRNAsize}nt_sort.bam.{bamidx}",
+               mode = mode,
+               sample = samples,
+               refbase = refbase,
+               sRNAsize = sRNAsize,
+               bamidx = bamidx),
+        expand("mapped/{mode}/bw/{sample}_MappedOn_{refbase}_{mode}_sort_norm.bw",
+               mode = mode,
+               sample = samples,
+               refbase = refbase),
+        expand("mapped/{mode}/bw/{sample}_MappedOn_{refbase}_{mode}_{sRNAsize}nt_sort_norm.bw",
+               mode = mode,
+               sample = samples,
+               refbase = refbase,
+               sRNAsize = sRNAsize),
+        expand("mapped/{mode}/bg/{sample}_MappedOn_{refbase}_{mode}_sort_norm.bedgraph",
+               mode = mode,
+               sample = samples,
+               refbase = refbase),
+        expand("mapped/{mode}/bg/{sample}_MappedOn_{refbase}_{mode}_{sRNAsize}nt_sort_norm.bedgraph",
+               mode = mode,
+               sample = samples,
+               refbase = refbase,
+               sRNAsize = sRNAsize),
+        expand("mapped/{mode}/bg/{sample}_MappedOn_{refbase}_{mode}_sort_norm_binSize{genomeBinName}.bedgraph",
+               mode = mode,
+               sample = samples,
+               refbase = refbase,
+               genomeBinName = genomeBinName),
+        expand("mapped/{mode}/bg/{sample}_MappedOn_{refbase}_{mode}_{sRNAsize}nt_sort_norm_binSize{genomeBinName}.bedgraph",
+               mode = mode,
+               sample = samples,
+               refbase = refbase,
+               sRNAsize = sRNAsize,
+               genomeBinName = genomeBinName),
+        expand("mapped/{mode}/bg/{sample}_MappedOn_{refbase}_{mode}_{sRNAsizes}nt_sort_TPM.bedgraph",
+               mode = mode,
+               sample = samples,
+               refbase = refbase,
+               sRNAsizes = sRNAsizes),
+        expand("mapped/{mode}/bw/{sample}_MappedOn_{refbase}_{mode}_{sRNAsizes}nt_sort_TPM.bw",
+               mode = mode,
+               sample = samples,
+               refbase = refbase,
+               sRNAsizes = sRNAsizes),
+        expand("mapped/{mode}/tsv/{sample}_MappedOn_{refbase}_{mode}_{sRNAsizes}nt_sort_TPM_binSize{genomeBinName}.tsv",
+               mode = mode,
+               sample = samples,
+               refbase = refbase,
+               sRNAsizes = sRNAsizes,
+               genomeBinName = genomeBinName)
+
+# Run fastqc on R1 raw data
+rule fastqc_R1_raw:
+    """Create fastqc report"""
+    resources:
+        partition = "icelake",
+        mem_mb    = 3380,
+        time      = "12:00:00"
+    input:
+        "data/{sample}_R1.fastq.gz"
+    output:
+        html = "logs/fastqc/raw/{sample}_R1_fastqc.html",
+        zip  = "logs/fastqc/raw/{sample}_R1_fastqc.zip"
+    params: "--extract"
+    log:
+        "logs/fastqc/raw/{sample}_R1.log"
+    wrapper:
+        "0.27.1/bio/fastqc"
+
+# Remove rRNA
+rule bbduk:
+    """Remove rRNA"""
+    resources:
+        partition = "icelake",
+        mem_mb    = 256880,
+        time      = "12:00:00"
+    input:
+        "data/{sample}_R1.fastq.gz"
+    output:
+        rRNA    = "data/{sample}_R1_rRNA.fastq.gz",
+        nonrRNA = "data/{sample}_R1_rRNAremoved.fastq.gz"
+    threads: config["THREADS"]
+    params:
+        memory    = config["MEMORY"],
+        kmerSize  = config["FILTER"]["bbduk"]["kmerSize"],
+        rRNAfasta = config["FILTER"]["bbduk"]["rRNAfasta"]
+    log:
+        "logs/bbduk/{sample}_R1_rRNAremoved.log"
+    shell:
+        "(bbduk.sh -Xmx{params.memory}"
+        "          in={input}"
+        "          outmatch={output.rRNA}"
+        "          outnonmatch={output.nonrRNA}"
+        "          k={params.kmerSize}"
+        "          ref={params.rRNAfasta}"
+        "          threads={threads}) &> {log}"
+
+# Trim off adapters
+rule cutadapt:
+    """Remove adapters"""
+    resources:
+        partition = "icelake",
+        mem_mb    = 256880,
+        time      = "12:00:00"
+    input:
+        "data/{sample}_R1_rRNAremoved.fastq.gz"
+    output:
+        fastq = "data/trimmed/{sample}_R1_rRNAremoved_trimmed.fastq.gz",
+        qc    = "data/trimmed/{sample}_R1_rRNAremoved_trimmed.qc.txt"
+    params:
+        " -a " +     config["FILTER"]["cutadapt"]["3adapter"] +
+        " -g " +     config["FILTER"]["cutadapt"]["5adapter"] +
+        " -q " + str(config["FILTER"]["cutadapt"]["quality-filter"]) +
+        " -m " + str(config["FILTER"]["cutadapt"]["minimum-length"]) +
+        " -M " + str(config["FILTER"]["cutadapt"]["maximum-length"]) +
+        " -O " + str(config["FILTER"]["cutadapt"]["minimum-overlap"]) +
+        " --cores=0"
+    log:
+        "logs/cutadapt/{sample}_R1_trimmed.log"
+    wrapper:
+        "0.27.1/bio/cutadapt/se"
+
+# Run fastqc on R1 trimmed data
+rule fastqc_R1_trimmed:
+    """Create fastqc report"""
+    resources:
+        partition = "icelake",
+        mem_mb    = 3380,
+        time      = "12:00:00"
+    input:
+        "data/trimmed/{sample}_R1_rRNAremoved_trimmed.fastq.gz"
+    output:
+        html = "logs/fastqc/trimmed/{sample}_R1_rRNAremoved_trimmed_fastqc.html",
+        zip  = "logs/fastqc/trimmed/{sample}_R1_rRNAremoved_trimmed_fastqc.zip"
+    params: "--extract"
+    log:
+        "logs/fastqc/trimmed/{sample}_R1_rRNAremoved_trimmed.log"
+    wrapper:
+        "0.27.1/bio/fastqc"
+
+# Align to reference genome
+rule bowtie:
+    """Map small RNAs using bowtie and sort them using samtools"""
+    resources:
+        partition = "icelake",
+        mem_mb    = 256880,
+        time      = "12:00:00"
+    input:
+        "data/trimmed/{sample}_R1_rRNAremoved_trimmed.fastq.gz"
+    output:
+        protected("mapped/{mode}/{sample}_MappedOn_{refbase}_{mode}_sort.bam")
+    log:
+        "logs/bowtie/{sample}_MappedOn_{refbase}_{mode}_sort.log"
+    params:
+        sortMemory = config["MAPPING"]["sortMemory"]
+    threads: config["THREADS"]
+    shell:
+        "(bowtie {reference} --threads {threads} -v {mismatches}"
+        " {bowtie_params} -q {input} -S "
+        "| samtools view -u -F 4 - "
+        "| samtools sort -@ {threads} -m {params.sortMemory} -o {output}) 2> {log}"
+
+# Extract differently sized sRNA populations as BAM files
+rule sRNAsize_extract:
+    """Extract differently sized sRNA populations as BAM files"""
+    resources:
+        partition = "icelake",
+        mem_mb    = 256880,
+        time      = "12:00:00"
+    input:
+        "mapped/{mode}/{sample}_MappedOn_{refbase}_{mode}_sort.bam"
+    output:
+        protected("mapped/{mode}/{sample}_MappedOn_{refbase}_{mode}_{sRNAsize}nt_sort.bam")
+    params:
+        sortMemory = config["MAPPING"]["sortMemory"]
+    threads: config["THREADS"]
+    log:
+        "logs/samtools/{sample}_MappedOn_{refbase}_{mode}_{sRNAsize}nt_sort.log"
+    shell:
+        "(samtools view -h {input} "
+        "| awk 'BEGIN{{OFS=FS=\"\\t\"}}/^@/{{print}}!/^@/{{if(length($10)=={sRNAsize}) print}}' "
+        "| samtools view -u - "
+        "| samtools sort -@ {threads} -m {params.sortMemory} -o {output}) 2> {log}"
+
+# Postmapping steps:
+# Index BAM files (index format [bai or csi] depends on chromosome sizes)
+# Generate samtools flagstat and idxstats
+# Calculate library-size-normalized coverage
+if bamidx == "bai":
+    rule postmapping:
+        """bam.bai samtools flagstat idxstats"""
+        resources:
+            partition = "icelake",
+            mem_mb    = 3380,
+            time      = "12:00:00"
+        input:
+            mapped = "mapped/{mode}/{sample}_MappedOn_{refbase}_{mode}_sort.bam"
+        output:
+            mapped = "mapped/{mode}/{sample}_MappedOn_{refbase}_{mode}_sort.bam.bai"
+        log:
+            mappedflagstat = "logs/samtools/stats/{sample}_MappedOn_{refbase}_{mode}_sort_flagstat.log",
+            mappedidxstats = "logs/samtools/stats/{sample}_MappedOn_{refbase}_{mode}_sort_idxstats.log"
+        shell:
+            """
+            samtools index    {input.mapped}
+            samtools flagstat {input.mapped} > {log.mappedflagstat}
+            samtools idxstats {input.mapped} > {log.mappedidxstats}
+            """
+    rule calc_coverage:
+        """Calculate library-size-normalized coverage"""
+        resources:
+            partition = "icelake",
+            mem_mb    = 256880,
+            time      = "12:00:00"
+        input:
+            mappedBAM    = "mapped/{mode}/{sample}_MappedOn_{refbase}_{mode}_sort.bam",
+            mappedBAMidx = "mapped/{mode}/{sample}_MappedOn_{refbase}_{mode}_sort.bam.bai"
+        output:
+            mappedBW = "mapped/{mode}/bw/{sample}_MappedOn_{refbase}_{mode}_sort_norm.bw",
+            mappedBG = "mapped/{mode}/bg/{sample}_MappedOn_{refbase}_{mode}_sort_norm.bedgraph"
+        params:
+            normalizeUsing         = config["COVERAGE"]["normalizeUsing"],
+            ignoreForNormalization = config["COVERAGE"]["ignoreForNormalization"],
+            binSize                = config["COVERAGE"]["binSize"]
+        threads: config["THREADS"]  
+        log:
+            mapped = "logs/bamCoverage/{sample}_MappedOn_{refbase}_{mode}_sort_norm.log"
+        shell:
+            "(bamCoverage -b {input.mappedBAM} -o {output.mappedBW}"
+            " --normalizeUsing {params.normalizeUsing}"
+            " --ignoreForNormalization {params.ignoreForNormalization}"
+            " --binSize {params.binSize} -p {threads}; "
+            "bamCoverage -b {input.mappedBAM} -o {output.mappedBG} -of bedgraph"
+            " --normalizeUsing {params.normalizeUsing}"
+            " --ignoreForNormalization {params.ignoreForNormalization}"
+            " --binSize {params.binSize} -p {threads}) 2> {log.mapped}"
+    rule calc_coverage_genome:
+        """Calculate library-size-normalized coverage in adjacent windows"""
+        resources:
+            partition = "icelake",
+            mem_mb    = 256880,
+            time      = "12:00:00"
+        input:
+            mappedBAM    = "mapped/{mode}/{sample}_MappedOn_{refbase}_{mode}_sort.bam",
+            mappedBAMidx = "mapped/{mode}/{sample}_MappedOn_{refbase}_{mode}_sort.bam.bai"
+        output:
+            mappedBGgenome = "mapped/{mode}/bg/{sample}_MappedOn_{refbase}_{mode}_sort_norm_binSize{genomeBinName}.bedgraph"
+        params:
+            normalizeUsing         = config["COVERAGE"]["normalizeUsing"],
+            ignoreForNormalization = config["COVERAGE"]["ignoreForNormalization"],
+            genomeBinSize          = config["COVERAGE"]["genomeBinSize"]
+        threads: config["THREADS"]  
+        log:
+            mapped = "logs/bamCoverage/{sample}_MappedOn_{refbase}_{mode}_sort_norm_binSize{genomeBinName}.log"
+        shell:
+            "(bamCoverage -b {input.mappedBAM} -o {output.mappedBGgenome} -of bedgraph"
+            " --normalizeUsing {params.normalizeUsing}"
+            " --ignoreForNormalization {params.ignoreForNormalization}"
+            " --binSize {params.genomeBinSize} -p {threads}) 2> {log.mapped}"
+    rule postmapping_sRNAsize:
+        """bam.bai samtools flagstat idxstats"""
+        resources:
+            partition = "icelake",
+            mem_mb    = 3380,
+            time      = "12:00:00"
+        input:
+            subset = "mapped/{mode}/{sample}_MappedOn_{refbase}_{mode}_{sRNAsize}nt_sort.bam"
+        output:
+            subset = "mapped/{mode}/{sample}_MappedOn_{refbase}_{mode}_{sRNAsize}nt_sort.bam.bai"
+        log:
+            subsetflagstat = "logs/samtools/stats/{sample}_MappedOn_{refbase}_{mode}_{sRNAsize}nt_sort_flagstat.log",
+            subsetidxstats = "logs/samtools/stats/{sample}_MappedOn_{refbase}_{mode}_{sRNAsize}nt_sort_idxstats.log"
+        shell:
+            """
+            samtools index    {input.subset}
+            samtools flagstat {input.subset} > {log.subsetflagstat}
+            samtools idxstats {input.subset} > {log.subsetidxstats}
+            """
+    rule calc_coverage_sRNAsize:
+        """Calculate library-size-normalized coverage"""
+        resources:
+            partition = "icelake",
+            mem_mb    = 256880,
+            time      = "12:00:00"
+        input:
+            subsetBAM    = "mapped/{mode}/{sample}_MappedOn_{refbase}_{mode}_{sRNAsize}nt_sort.bam",
+            subsetBAMidx = "mapped/{mode}/{sample}_MappedOn_{refbase}_{mode}_{sRNAsize}nt_sort.bam.bai"
+        output:
+            subsetBW = "mapped/{mode}/bw/{sample}_MappedOn_{refbase}_{mode}_{sRNAsize}nt_sort_norm.bw",
+            subsetBG = "mapped/{mode}/bg/{sample}_MappedOn_{refbase}_{mode}_{sRNAsize}nt_sort_norm.bedgraph"
+        params:
+            normalizeUsing         = config["COVERAGE"]["normalizeUsing"],
+            ignoreForNormalization = config["COVERAGE"]["ignoreForNormalization"],
+            binSize                = config["COVERAGE"]["binSize"]
+        threads: config["THREADS"]  
+        log:
+            subset = "logs/bamCoverage/{sample}_MappedOn_{refbase}_{mode}_{sRNAsize}nt_sort_norm.log"
+        shell:
+            "(bamCoverage -b {input.subsetBAM} -o {output.subsetBW}"
+            " --normalizeUsing {params.normalizeUsing}"
+            " --ignoreForNormalization {params.ignoreForNormalization}"
+            " --binSize {params.binSize} -p {threads}; "
+            "bamCoverage -b {input.subsetBAM} -o {output.subsetBG} -of bedgraph"
+            " --normalizeUsing {params.normalizeUsing}"
+            " --ignoreForNormalization {params.ignoreForNormalization}"
+            " --binSize {params.binSize} -p {threads}) 2> {log.subset}"
+    rule calc_coverage_genome_sRNAsize:
+        """Calculate library-size-normalized coverage in adjacent windows"""
+        resources:
+            partition = "icelake",
+            mem_mb    = 256880,
+            time      = "12:00:00"
+        input:
+            subsetBAM    = "mapped/{mode}/{sample}_MappedOn_{refbase}_{mode}_{sRNAsize}nt_sort.bam",
+            subsetBAMidx = "mapped/{mode}/{sample}_MappedOn_{refbase}_{mode}_{sRNAsize}nt_sort.bam.bai"
+        output:
+            subsetBGgenome = "mapped/{mode}/bg/{sample}_MappedOn_{refbase}_{mode}_{sRNAsize}nt_sort_norm_binSize{genomeBinName}.bedgraph"
+        params:
+            normalizeUsing         = config["COVERAGE"]["normalizeUsing"],
+            ignoreForNormalization = config["COVERAGE"]["ignoreForNormalization"],
+            genomeBinSize          = config["COVERAGE"]["genomeBinSize"]
+        threads: config["THREADS"]  
+        log:
+            subset = "logs/bamCoverage/{sample}_MappedOn_{refbase}_{mode}_{sRNAsize}nt_sort_norm_binSize{genomeBinName}.log"
+        shell:
+            "(bamCoverage -b {input.subsetBAM} -o {output.subsetBGgenome} -of bedgraph"
+            " --normalizeUsing {params.normalizeUsing}"
+            " --ignoreForNormalization {params.ignoreForNormalization}"
+            " --binSize {params.genomeBinSize} -p {threads}) 2> {log.subset}"
+else:
+    rule postmapping:
+        resources:
+            partition = "icelake",
+            mem_mb    = 3380,
+            time      = "12:00:00"
+        """bam.csi samtools flagstat idxstats"""
+        input:
+            mapped = "mapped/{mode}/{sample}_MappedOn_{refbase}_{mode}_sort.bam"
+        output:
+            mapped = "mapped/{mode}/{sample}_MappedOn_{refbase}_{mode}_sort.bam.csi"
+        log:
+            mappedflagstat = "logs/samtools/stats/{sample}_MappedOn_{refbase}_{mode}_sort_flagstat.log",
+            mappedidxstats = "logs/samtools/stats/{sample}_MappedOn_{refbase}_{mode}_sort_idxstats.log"
+        shell:
+            """
+            samtools index -c -m 14 {input.mapped}
+            samtools flagstat       {input.mapped} > {log.mappedflagstat}
+            samtools idxstats       {input.mapped} > {log.mappedidxstats}
+            """
+    rule calc_coverage:
+        """Calculate library-size-normalized coverage"""
+        resources:
+            partition = "icelake",
+            mem_mb    = 256880,
+            time      = "12:00:00"
+        input:
+            mappedBAM    = "mapped/{mode}/{sample}_MappedOn_{refbase}_{mode}_sort.bam",
+            mappedBAMidx = "mapped/{mode}/{sample}_MappedOn_{refbase}_{mode}_sort.bam.csi"
+        output:
+            mappedBW = "mapped/{mode}/bw/{sample}_MappedOn_{refbase}_{mode}_sort_norm.bw",
+            mappedBG = "mapped/{mode}/bg/{sample}_MappedOn_{refbase}_{mode}_sort_norm.bedgraph"
+        params:
+            normalizeUsing         = config["COVERAGE"]["normalizeUsing"],
+            ignoreForNormalization = config["COVERAGE"]["ignoreForNormalization"],
+            binSize                = config["COVERAGE"]["binSize"]
+        threads: config["THREADS"]  
+        log:
+            mapped = "logs/bamCoverage/{sample}_MappedOn_{refbase}_{mode}_sort_norm.log"
+        shell:
+            "(bamCoverage -b {input.mappedBAM} -o {output.mappedBW}"
+            " --normalizeUsing {params.normalizeUsing}"
+            " --ignoreForNormalization {params.ignoreForNormalization}"
+            " --binSize {params.binSize} -p {threads}; "
+            "bamCoverage -b {input.mappedBAM} -o {output.mappedBG} -of bedgraph"
+            " --normalizeUsing {params.normalizeUsing}"
+            " --ignoreForNormalization {params.ignoreForNormalization}"
+            " --binSize {params.binSize} -p {threads}) 2> {log.mapped}"
+    rule calc_coverage_genome:
+        """Calculate library-size-normalized coverage in adjacent windows"""
+        resources:
+            partition = "icelake",
+            mem_mb    = 256880,
+            time      = "12:00:00"
+        input:
+            mappedBAM    = "mapped/{mode}/{sample}_MappedOn_{refbase}_{mode}_sort.bam",
+            mappedBAMidx = "mapped/{mode}/{sample}_MappedOn_{refbase}_{mode}_sort.bam.csi"
+        output:
+            mappedBGgenome = "mapped/{mode}/bg/{sample}_MappedOn_{refbase}_{mode}_sort_norm_binSize{genomeBinName}.bedgraph"
+        params:
+            normalizeUsing         = config["COVERAGE"]["normalizeUsing"],
+            ignoreForNormalization = config["COVERAGE"]["ignoreForNormalization"],
+            genomeBinSize          = config["COVERAGE"]["genomeBinSize"]
+        threads: config["THREADS"]  
+        log:
+            mapped = "logs/bamCoverage/{sample}_MappedOn_{refbase}_{mode}_sort_norm_binSize{genomeBinName}.log"
+        shell:
+            "(bamCoverage -b {input.mappedBAM} -o {output.mappedBGgenome} -of bedgraph"
+            " --normalizeUsing {params.normalizeUsing}"
+            " --ignoreForNormalization {params.ignoreForNormalization}"
+            " --binSize {params.genomeBinSize} -p {threads}) 2> {log.mapped}"
+    rule postmapping_sRNAsize:
+        """bam.csi samtools flagstat idxstats"""
+        resources:
+            partition = "icelake",
+            mem_mb    = 3380,
+            time      = "12:00:00"
+        input:
+            subset = "mapped/{mode}/{sample}_MappedOn_{refbase}_{mode}_{sRNAsize}nt_sort.bam"
+        output:
+            subset = "mapped/{mode}/{sample}_MappedOn_{refbase}_{mode}_{sRNAsize}nt_sort.bam.csi"
+        log:
+            subsetflagstat = "logs/samtools/stats/{sample}_MappedOn_{refbase}_{mode}_{sRNAsize}nt_sort_flagstat.log",
+            subsetidxstats = "logs/samtools/stats/{sample}_MappedOn_{refbase}_{mode}_{sRNAsize}nt_sort_idxstats.log"
+        shell:
+            """
+            samtools index -c -m 14 {input.subset}
+            samtools flagstat       {input.subset} > {log.subsetflagstat}
+            samtools idxstats       {input.subset} > {log.subsetidxstats}
+            """
+    rule calc_coverage_sRNAsize:
+        """Calculate library-size-normalized coverage"""
+        resources:
+            partition = "icelake",
+            mem_mb    = 256880,
+            time      = "12:00:00"
+        input:
+            subsetBAM    = "mapped/{mode}/{sample}_MappedOn_{refbase}_{mode}_{sRNAsize}nt_sort.bam",
+            subsetBAMidx = "mapped/{mode}/{sample}_MappedOn_{refbase}_{mode}_{sRNAsize}nt_sort.bam.csi"
+        output:
+            subsetBW = "mapped/{mode}/bw/{sample}_MappedOn_{refbase}_{mode}_{sRNAsize}nt_sort_norm.bw",
+            subsetBG = "mapped/{mode}/bg/{sample}_MappedOn_{refbase}_{mode}_{sRNAsize}nt_sort_norm.bedgraph"
+        params:
+            normalizeUsing         = config["COVERAGE"]["normalizeUsing"],
+            ignoreForNormalization = config["COVERAGE"]["ignoreForNormalization"],
+            binSize                = config["COVERAGE"]["binSize"]
+        threads: config["THREADS"]  
+        log:
+            subset = "logs/bamCoverage/{sample}_MappedOn_{refbase}_{mode}_{sRNAsize}nt_sort_norm.log"
+        shell:
+            "(bamCoverage -b {input.subsetBAM} -o {output.subsetBW}"
+            " --normalizeUsing {params.normalizeUsing}"
+            " --ignoreForNormalization {params.ignoreForNormalization}"
+            " --binSize {params.binSize} -p {threads}; "
+            "bamCoverage -b {input.subsetBAM} -o {output.subsetBG} -of bedgraph"
+            " --normalizeUsing {params.normalizeUsing}"
+            " --ignoreForNormalization {params.ignoreForNormalization}"
+            " --binSize {params.binSize} -p {threads}) 2> {log.subset}"
+    rule calc_coverage_genome_sRNAsize:
+        """Calculate library-size-normalized coverage in adjacent windows"""
+        resources:
+            partition = "icelake",
+            mem_mb    = 256880,
+            time      = "12:00:00"
+        input:
+            subsetBAM    = "mapped/{mode}/{sample}_MappedOn_{refbase}_{mode}_{sRNAsize}nt_sort.bam",
+            subsetBAMidx = "mapped/{mode}/{sample}_MappedOn_{refbase}_{mode}_{sRNAsize}nt_sort.bam.csi"
+        output:
+            subsetBGgenome = "mapped/{mode}/bg/{sample}_MappedOn_{refbase}_{mode}_{sRNAsize}nt_sort_norm_binSize{genomeBinName}.bedgraph"
+        params:
+            normalizeUsing         = config["COVERAGE"]["normalizeUsing"],
+            ignoreForNormalization = config["COVERAGE"]["ignoreForNormalization"],
+            genomeBinSize          = config["COVERAGE"]["genomeBinSize"]
+        threads: config["THREADS"]  
+        log:
+            subset = "logs/bamCoverage/{sample}_MappedOn_{refbase}_{mode}_{sRNAsize}nt_sort_norm_binSize{genomeBinName}.log"
+        shell:
+            "(bamCoverage -b {input.subsetBAM} -o {output.subsetBGgenome} -of bedgraph"
+            " --normalizeUsing {params.normalizeUsing}"
+            " --ignoreForNormalization {params.ignoreForNormalization}"
+            " --binSize {params.genomeBinSize} -p {threads}) 2> {log.subset}"
+
+# Use R script bin_bamTPM_sRNAsizes.R to calculate per-base TPM and output as bedgraph
+rule bin_bedgraphTPM:
+    """TPM-normalize fine-scale coverage for each sRNA size class"""
+    resources:
+        partition = "icelake",
+        mem_mb    = 256880,
+        time      = "12:00:00"
+    input:
+        "mapped/{mode}/{sample}_MappedOn_{refbase}_{mode}_sort.bam"
+    output:
+        ["".join (map (str, x)) for x in zip (
+         ["mapped/{mode}/bg/{sample}_MappedOn_{refbase}_{mode}_"]*len(sRNAsizes),
+         sRNAsizes,
+         ["nt_sort_TPM.bedgraph"]*len(sRNAsizes))
+        ]
+    params:
+        binSize = config["COVERAGE"]["binSize"]
+    threads: config["THREADS"]  
+    log:
+        "logs/bin_bedgraphTPM/{sample}_MappedOn_{refbase}_{mode}_sRNAsizes_sort_TPM_bin_bedgraph.log"
+    shell:
+       "(scripts/bin_bamTPM_sRNAsizes.R"
+       " {wildcards.sample}"
+       " {refbase}"
+       " {mode}"
+       " {params.binSize}) &> {log}"
+
+# Convert bedGraph into bigWig format for IGV and for use with
+# deepTools computeMatrix function (in a separate Snakemake workflow),
+# to create a matrix of profiles around features
+# NOTE: chromosome sizes file ("data/index/T2T_Col.fa.sizes") must exist
+# before running snakemake; e.g., in "data/index/" run:
+# samtools faidx T2T_Col.fa;
+# cut -f1,2 T2T_Col.fa.fai > T2T_Col.fa.sizes
+rule bedGraphToBigWig:
+    """Convert bedGraph into bigWig format"""
+    resources:
+        partition = "icelake",
+        mem_mb    = 3380,
+        time      = "12:00:00"
+    input:
+        "mapped/{mode}/bg/{sample}_MappedOn_{refbase}_{mode}_{sRNAsizes}nt_sort_TPM.bedgraph"
+    output:
+        "mapped/{mode}/bw/{sample}_MappedOn_{refbase}_{mode}_{sRNAsizes}nt_sort_TPM.bw"
+    log:
+        "logs/bedGraphToBigWig/{sample}_MappedOn_{refbase}_{mode}_{sRNAsizes}nt_sort_TPM_bedGraphToBigWig.log"
+    shell:
+        # USAGE: bedGraphToBigWig in.bedGraph chrom.sizes out.bw
+        # where in.bedGraph is a four-column file in the format:
+        #       <chrom> <start> <end> <value>
+        # and chrom.sizes is a two-column file/URL: <chromosome name> <size in bases>
+        # and out.bw is the output indexed big wig file.
+        # The input bedGraph file must be sorted; use the unix sort command:
+        "(bedGraphToBigWig {input}"
+        " data/index/{refbase}.fa.sizes"
+        " {output}) &> {log}"
+
+# Use R script genomeBin_bamTPM_sRNAsizes.R to calculate per-window TPM and output as tsv
+rule genomeBin_bedgraphTPM:
+    """TPM-normalize broad-scale coverage for each sRNA size class"""
+    resources:
+        partition = "icelake",
+        mem_mb    = 256880,
+        time      = "12:00:00"
+    input:
+        "mapped/{mode}/{sample}_MappedOn_{refbase}_{mode}_sort.bam"
+    output:
+        ["".join (map (str, x)) for x in zip (
+         ["mapped/{mode}/tsv/{sample}_MappedOn_{refbase}_{mode}_"]*len(sRNAsizes),
+         sRNAsizes,
+         ["nt_sort_TPM_binSize" + genomeBinName + ".tsv"]*len(sRNAsizes))
+        ]
+    params:
+        genomeBinSize = config["COVERAGE"]["genomeBinSize"]
+    threads: config["THREADS"]  
+    log:
+        "logs/genomeBin_bedgraphTPM/{sample}_MappedOn_{refbase}_{mode}_sRNAsizes_sort_TPM_genomeBin" + genomeBinName + "_bedgraph.log"
+    shell:
+       "(scripts/genomeBin_bamTPM_sRNAsizes.R"
+       " {wildcards.sample}"
+       " {refbase}"
+       " {mode}"
+       " {params.genomeBinSize}) &> {log}"
