@@ -1,0 +1,5 @@
+Scripts for the quality assessment of A. thaliana HiFi assemblies
+
+To create the primary and secondary allele frequency plots, we used NucFreq v0.1, which can be access here: https://github.com/mrvollger/NucFreq
+
+- Script 'HetDetection_modified2.R' in this directory is a modified version of their original script ‘hetDetection.R’ for the detection of heterozygous sites.
