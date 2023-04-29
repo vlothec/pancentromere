@@ -1,0 +1,2 @@
+Scripts to obtain SNP and INDEL calls with DeepVariant and GLnexus. 
+Input BAM files derived from alignment of HiFi reads to the Col-0 HiFi assembly.
